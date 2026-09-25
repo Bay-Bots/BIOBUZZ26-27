@@ -1,6 +1,7 @@
 // File: TeamCode/src/main/java/org/firstinspires/ftc/teamcode/oysterbay/base/RobotStructure.java
 package org.firstinspires.ftc.teamcode.oysterbay.base;
 
+import com.qualcomm.hardware.lynx.LynxModule;
 import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.DcMotorEx;
 import com.qualcomm.robotcore.hardware.DcMotorSimple;
@@ -8,6 +9,8 @@ import com.qualcomm.robotcore.hardware.Gamepad;
 import com.qualcomm.robotcore.hardware.HardwareMap;
 import com.qualcomm.robotcore.hardware.CRServo;
 import com.qualcomm.robotcore.util.Range;
+
+import java.util.List;
 
 /**
  * TeleOp-only drivetrain structure to be reused across programs.
@@ -26,6 +29,8 @@ public class RobotStructure {
     private CRServo servoTrapLeft;
     private CRServo servoTrapRight;
 
+    private List<LynxModule> hubs;
+
     // --- Tunables ---
     private static final double DEADBAND = 0.05;  // stick deadzone
     private static final double EXPO_DRIVE = 2.0; // >1 softens low-end; 1.0 = linear
@@ -34,6 +39,13 @@ public class RobotStructure {
     private static final double TURN_BOOST = 1.20;
 
     public void init(HardwareMap hardwareMap) {
+        // Bulk caching: one bulk read per hub per loop instead of one USB/serial
+        // transaction per encoder/velocity read. Call clearBulkCache() at the top of every loop().
+        hubs = hardwareMap.getAll(LynxModule.class);
+        for (LynxModule hub : hubs) {
+            hub.setBulkCachingMode(LynxModule.BulkCachingMode.MANUAL);
+        }
+
         motorFrontRight = hardwareMap.get(DcMotorEx.class, "motorFrontRight");
         motorFrontLeft  = hardwareMap.get(DcMotorEx.class, "motorFrontLeft");
         motorBackRight  = hardwareMap.get(DcMotorEx.class, "motorBackRight");
@@ -50,6 +62,13 @@ public class RobotStructure {
         motorFrontRight.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
         motorBackLeft.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
         motorBackRight.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
+    }
+
+    /** Invalidate the bulk-read cache. Must be called once at the start of every loop(). */
+    public void clearBulkCache() {
+        for (LynxModule hub : hubs) {
+            hub.clearBulkCache();
+        }
     }
 
     /**

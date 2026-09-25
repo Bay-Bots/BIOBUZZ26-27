@@ -15,9 +15,12 @@ import com.qualcomm.robotcore.util.Range;
 
 import org.firstinspires.ftc.robotcore.external.hardware.camera.WebcamName;
 import org.firstinspires.ftc.vision.VisionPortal;
+import org.firstinspires.ftc.vision.apriltag.AprilTagDetection;
 import org.firstinspires.ftc.vision.apriltag.AprilTagProcessor;
 
 import org.firstinspires.ftc.teamcode.oysterbay.base.RobotStructure;
+
+import java.util.List;
 
 /**
  * TeleOp that matches your original driver controls, but uses setVelocity() for the shooter.
@@ -112,6 +115,9 @@ public class OBTeleOp_Shooter extends OpMode {
     private final ElapsedTime spinupTimer = new ElapsedTime();
     private boolean firedThisPress = false;
 
+    // Last commanded shooter RPM; setVelocity() is only sent to the hub when this changes
+    private double lastShooterRpm = Double.NaN;
+
     @Override
     public void init() {
         // Drivetrain
@@ -173,20 +179,14 @@ public class OBTeleOp_Shooter extends OpMode {
 
     @Override
     public void loop() {
+        // One bulk read per hub this loop; all encoder/velocity reads below come from the cache
+        robot.clearBulkCache();
+
         // =========================
-        // Normal drive
+        // Normal drive (X held = boost)
         // =========================
-        boolean squaredInputs = true;
-        double speedMult = 0.8;
-        if (gamepad1.x) {
-            speedMult = 1.5;
-            if (!gamepad1.x) {
-                speedMult = 0.8;
-            }
-        } else {
-            speedMult = 0.8;
-        }
-        robot.driveFromGamepad(gamepad1, squaredInputs, speedMult);
+        double speedMult = gamepad1.x ? 1.5 : 0.8;
+        robot.driveFromGamepad(gamepad1, true, speedMult);
 
         // =========================
         // Trap CR servos
@@ -250,17 +250,10 @@ public class OBTeleOp_Shooter extends OpMode {
         double trigShort = Range.clip(gamepad1.left_trigger,  0.0, 1.0);
 
         ShotMode requestedMode = ShotMode.NONE;
-        double activeTrig = 0.0;
-        double activeTargetRpm = 0.0;
-
         if (trigLong >= SPIN_THRESHOLD) {
             requestedMode = ShotMode.LONG;
-            activeTrig = trigLong;
-            activeTargetRpm = SHOOTER_LONG_TARGET_RPM;
         } else if (trigShort >= SPIN_THRESHOLD) {
             requestedMode = ShotMode.SHORT;
-            activeTrig = trigShort;
-            activeTargetRpm = SHOOTER_SHORT_TARGET_RPM;
         }
 
         // =========================
@@ -275,7 +268,7 @@ public class OBTeleOp_Shooter extends OpMode {
 
                 if (requestedMode != ShotMode.NONE) {
                     shotMode = requestedMode;
-                    setShooterRpm(activeTargetRpm);
+                    setShooterRpm(targetRpmFor(shotMode));
                     spinupTimer.reset();
                     state = FireState.SPINNING;
                 }
@@ -290,16 +283,14 @@ public class OBTeleOp_Shooter extends OpMode {
 
                 // If driver switches modes while spinning, swap targets smoothly
                 shotMode = requestedMode;
-                activeTargetRpm = (shotMode == ShotMode.LONG) ? SHOOTER_LONG_TARGET_RPM : SHOOTER_SHORT_TARGET_RPM;
-                activeTrig = (shotMode == ShotMode.LONG) ? trigLong : trigShort;
+                double spinTarget = targetRpmFor(shotMode);
+                setShooterRpm(spinTarget);
 
-                setShooterRpm(activeTargetRpm);
-
-                boolean atSpeed = shooterAtSpeed(activeTargetRpm, AT_SPEED_TOL_RPM);
-                boolean timedOut = spinupTimer.seconds() >= SPINUP_TIMEOUT_SEC;
-
-                if (activeTrig >= FIRE_THRESHOLD && !firedThisPress) {
-                    if (!REQUIRE_AT_SPEED_TO_FIRE || atSpeed || timedOut) {
+                double spinTrig = (shotMode == ShotMode.LONG) ? trigLong : trigShort;
+                if (spinTrig >= FIRE_THRESHOLD && !firedThisPress) {
+                    if (!REQUIRE_AT_SPEED_TO_FIRE
+                            || shooterAtSpeed(spinTarget, AT_SPEED_TOL_RPM)
+                            || spinupTimer.seconds() >= SPINUP_TIMEOUT_SEC) {
                         tipperServo.setPosition(SERVO_FIRE_POS);
                         timer.reset();
                         firedThisPress = true;
@@ -310,8 +301,7 @@ public class OBTeleOp_Shooter extends OpMode {
 
             case FIRING:
                 // Keep current mode target RPM while firing
-                activeTargetRpm = (shotMode == ShotMode.LONG) ? SHOOTER_LONG_TARGET_RPM : SHOOTER_SHORT_TARGET_RPM;
-                setShooterRpm(activeTargetRpm);
+                setShooterRpm(targetRpmFor(shotMode));
 
                 if (timer.milliseconds() >= FIRE_PULSE_MS) {
                     tipperServo.setPosition(SERVO_REST_POS);
@@ -321,13 +311,12 @@ public class OBTeleOp_Shooter extends OpMode {
 
             case RECOVER:
                 // Keep current mode target RPM while recovering
-                activeTargetRpm = (shotMode == ShotMode.LONG) ? SHOOTER_LONG_TARGET_RPM : SHOOTER_SHORT_TARGET_RPM;
-                setShooterRpm(activeTargetRpm);
+                setShooterRpm(targetRpmFor(shotMode));
 
                 // Determine which trigger is active for reset logic
-                activeTrig = (shotMode == ShotMode.LONG) ? trigLong : trigShort;
+                double recoverTrig = (shotMode == ShotMode.LONG) ? trigLong : trigShort;
 
-                if (activeTrig < RESET_THRESHOLD) {
+                if (recoverTrig < RESET_THRESHOLD) {
                     firedThisPress = false;
 
                     // If they are still lightly holding either trigger, go back to SPINNING
@@ -345,8 +334,10 @@ public class OBTeleOp_Shooter extends OpMode {
         // =========================
         // Telemetry
         // =========================
+        // getDetections() copies the list, so fetch it once
+        List<AprilTagDetection> dets = (tagProc == null) ? null : tagProc.getDetections();
         telemetry.addData("Camera", visionPortal == null ? "null" : visionPortal.getCameraState());
-        telemetry.addData("Tag detections", (tagProc == null || tagProc.getDetections() == null) ? 0 : tagProc.getDetections().size());
+        telemetry.addData("Tag detections", dets == null ? 0 : dets.size());
 
         telemetry.addData("Mode", shotMode);
         telemetry.addData("Long Trigger", "%.3f", trigLong);
@@ -355,17 +346,13 @@ public class OBTeleOp_Shooter extends OpMode {
         telemetry.addData("Shooter L pos", shooterLeft.getCurrentPosition());
         telemetry.addData("Shooter R pos", shooterRight.getCurrentPosition());
 
-        telemetry.addData("Shooter Target RPM", "%.0f",
-                (shotMode == ShotMode.LONG) ? SHOOTER_LONG_TARGET_RPM :
-                        (shotMode == ShotMode.SHORT) ? SHOOTER_SHORT_TARGET_RPM : 0.0);
+        double displayTarget = targetRpmFor(shotMode);
+        telemetry.addData("Shooter Target RPM", "%.0f", displayTarget);
 
         telemetry.addData("Shooter L RPM (shooting+)", "%.0f", getShooterRpmShootPositive(shooterLeft, LEFT_CMD_SIGN));
         telemetry.addData("Shooter R RPM (shooting+)", "%.0f", getShooterRpmShootPositive(shooterRight, RIGHT_CMD_SIGN));
 
-        double displayTarget = (shotMode == ShotMode.LONG) ? SHOOTER_LONG_TARGET_RPM :
-                (shotMode == ShotMode.SHORT) ? SHOOTER_SHORT_TARGET_RPM : 0.0;
-
-        telemetry.addData("At speed?", (shotMode == ShotMode.NONE) ? false : shooterAtSpeed(displayTarget, AT_SPEED_TOL_RPM));
+        telemetry.addData("At speed?", shotMode != ShotMode.NONE && shooterAtSpeed(displayTarget, AT_SPEED_TOL_RPM));
         telemetry.addData("State", state);
         telemetry.addData("Tipper", tipperServo.getPosition() >= (SERVO_FIRE_POS - 0.02) ? "FIRING" : "REST");
 
@@ -393,7 +380,19 @@ public class OBTeleOp_Shooter extends OpMode {
     // =========================
     // Shooter helpers
     // =========================
+    private static double targetRpmFor(ShotMode mode) {
+        switch (mode) {
+            case LONG:  return SHOOTER_LONG_TARGET_RPM;
+            case SHORT: return SHOOTER_SHORT_TARGET_RPM;
+            default:    return 0.0;
+        }
+    }
+
     private void setShooterRpm(double rpm) {
+        // Skip redundant hub writes; the state machine re-commands the same RPM every loop
+        if (rpm == lastShooterRpm) return;
+        lastShooterRpm = rpm;
+
         double scaledRpm = rpm * SHOOTER_SCALE;
         double tps = rpmToTicksPerSec(scaledRpm);
 

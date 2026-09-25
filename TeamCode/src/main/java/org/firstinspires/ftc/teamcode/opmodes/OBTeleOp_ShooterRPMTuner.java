@@ -108,6 +108,9 @@ public class OBTeleOp_ShooterRPMTuner extends OpMode {
     // Tunables
     private double targetRpm = DEFAULT_RPM;
 
+    // Last commanded shooter RPM; setVelocity() is only sent to the hub when this changes
+    private double lastShooterRpm = Double.NaN;
+
     // Edge detection
     private boolean prevRB = false, prevLB = false, prevDU = false, prevDD = false;
     private boolean prevDL = false, prevDR = false;
@@ -156,10 +159,11 @@ public class OBTeleOp_ShooterRPMTuner extends OpMode {
 
     @Override
     public void loop() {
+        // One bulk read per hub this loop; all encoder/velocity reads below come from the cache
+        robot.clearBulkCache();
+
         // Drive (keep your normal feel)
-        boolean squaredInputs = true;
-        double speedMult = gamepad1.left_bumper ? 0.55 : 0.55;
-        robot.driveFromGamepad(gamepad1, squaredInputs, speedMult);
+        robot.driveFromGamepad(gamepad1, true, 0.55);
 
         // Intake (hold)
         if (gamepad1.a) intakeMotor.setPower(-1.0);
@@ -266,9 +270,12 @@ public class OBTeleOp_ShooterRPMTuner extends OpMode {
         }
 
         // Telemetry (show corrected “shooting+” RPM for both sides)
-        double lRpm = getShooterRpmShootPositive(shooterLeft, LEFT_CMD_SIGN);
-        double rRpm = getShooterRpmShootPositive(shooterRight, RIGHT_CMD_SIGN);
-        boolean atSpeedNow = shooterAtSpeed(targetRpm, atSpeedTolRpm);
+        double lVel = shooterLeft.getVelocity();
+        double rVel = shooterRight.getVelocity();
+        double lRpm = ticksPerSecToRpm(lVel * LEFT_CMD_SIGN);
+        double rRpm = ticksPerSecToRpm(rVel * RIGHT_CMD_SIGN);
+        boolean atSpeedNow = Math.abs(lRpm - targetRpm) <= atSpeedTolRpm
+                && Math.abs(rRpm - targetRpm) <= atSpeedTolRpm;
 
         telemetry.addData("Target RPM", "%.0f", targetRpm);
         telemetry.addData("L RPM (shooting+)", "%.0f", lRpm);
@@ -283,8 +290,8 @@ public class OBTeleOp_ShooterRPMTuner extends OpMode {
         // Raw encoder signs for debugging
         telemetry.addData("Raw L pos", shooterLeft.getCurrentPosition());
         telemetry.addData("Raw R pos", shooterRight.getCurrentPosition());
-        telemetry.addData("Raw L vel (t/s)", "%.0f", shooterLeft.getVelocity());
-        telemetry.addData("Raw R vel (t/s)", "%.0f", shooterRight.getVelocity());
+        telemetry.addData("Raw L vel (t/s)", "%.0f", lVel);
+        telemetry.addData("Raw R vel (t/s)", "%.0f", rVel);
 
         telemetry.update();
     }
@@ -303,6 +310,10 @@ public class OBTeleOp_ShooterRPMTuner extends OpMode {
     // Shooter helpers (ticks/sec)
     // =========================
     private void setShooterRpm(double rpm) {
+        // Skip redundant hub writes; the state machine re-commands the same RPM every loop
+        if (rpm == lastShooterRpm) return;
+        lastShooterRpm = rpm;
+
         // Allow reverse if you ever want it; for tuning you’ll keep rpm positive.
         double tps = rpmToTicksPerSec(rpm);
 

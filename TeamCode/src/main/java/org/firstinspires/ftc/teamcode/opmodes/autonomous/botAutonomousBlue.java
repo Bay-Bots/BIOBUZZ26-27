@@ -22,6 +22,7 @@ import com.acmerobotics.dashboard.telemetry.MultipleTelemetry;
 import org.firstinspires.ftc.robotcore.external.navigation.AngleUnit;
 import org.firstinspires.ftc.teamcode.GoBildaPinpointDriver;
 
+import com.qualcomm.hardware.lynx.LynxModule;
 import com.qualcomm.robotcore.eventloop.opmode.Autonomous;
 import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
 import com.qualcomm.robotcore.hardware.CRServo;
@@ -142,6 +143,11 @@ public class botAutonomousBlue extends LinearOpMode {
 
     @Override
     public void runOpMode() {
+        // Bulk reads: all encoder/velocity values on a hub arrive in one transaction.
+        // AUTO mode refreshes automatically whenever a value is read a second time.
+        for (LynxModule hub : hardwareMap.getAll(LynxModule.class)) {
+            hub.setBulkCachingMode(LynxModule.BulkCachingMode.AUTO);
+        }
 
         // =========================
         // Hardware init
@@ -434,7 +440,10 @@ public class botAutonomousBlue extends LinearOpMode {
         while (opModeIsActive() && spin.seconds() < SPINUP_TIMEOUT_SEC) {
             double lRpm = getShooterRpmShootPositive(shooterLeft, LEFT_CMD_SIGN);
             double rRpm = getShooterRpmShootPositive(shooterRight, RIGHT_CMD_SIGN);
-            boolean atSpeed = shooterAtSpeed(SHOOTER_TARGET_RPM, AT_SPEED_TOL_RPM);
+            // Reuse the readings above instead of reading both velocities again
+            double tgt = Math.abs(SHOOTER_TARGET_RPM);
+            boolean atSpeed = Math.abs(lRpm - tgt) <= AT_SPEED_TOL_RPM
+                    && Math.abs(rRpm - tgt) <= AT_SPEED_TOL_RPM;
 
             telemetry.addData("Shooter Target", "%.0f", SHOOTER_TARGET_RPM);
             telemetry.addData("Shooter L RPM", "%.0f", lRpm);
@@ -534,15 +543,6 @@ public class botAutonomousBlue extends LinearOpMode {
         motorBackRight.setPower(br / max);
 
     }
-    private boolean shooterAtSpeed(double targetRpm, double tolRpm) {
-        double tgt = Math.abs(targetRpm);
-
-        double l = getShooterRpmShootPositive(shooterLeft, LEFT_CMD_SIGN);
-        double r = getShooterRpmShootPositive(shooterRight, RIGHT_CMD_SIGN);
-
-        return Math.abs(l - tgt) <= tolRpm && Math.abs(r - tgt) <= tolRpm;
-    }
-
     private double getShooterRpmShootPositive(DcMotorEx m, int cmdSign) {
         double tpsRaw = m.getVelocity();
         double tpsShootPos = tpsRaw * cmdSign;
