@@ -1,52 +1,25 @@
 package org.firstinspires.ftc.teamcode.oysterbay.base;
 
-import com.qualcomm.robotcore.hardware.DcMotor;
-import com.qualcomm.robotcore.hardware.DcMotorEx;
-import com.qualcomm.robotcore.hardware.DcMotorSimple;
 import com.qualcomm.robotcore.hardware.Gamepad;
 import com.qualcomm.robotcore.hardware.HardwareMap;
-import com.qualcomm.robotcore.hardware.CRServo;
-import com.qualcomm.robotcore.util.Range;
+
+import org.firstinspires.ftc.teamcode.oysterbay.subsystems.MecanumDrivetrain;
 
 /**
- * TeleOp-only drivetrain structure to be reused across programs.
- * Owns the four drive motors and exposes simple helpers.
- *
- * Motor names expected in RC config:
- *  - "motorFrontRight", "motorFrontLeft", "motorBackRight", "motorBackLeft"
+ * Drivetrain wrapper with un-flipped stick conventions (compare {@link RobotStructure}).
+ * Currently unused by any OpMode.
  */
 public class autoStruct {
 
-    private DcMotorEx motorFrontRight;
-    private DcMotorEx motorFrontLeft;
-    private CRServo servoTrapLeft;
-    private CRServo servoTrapRight;
-    private DcMotorEx motorBackRight;
-    private DcMotorEx motorBackLeft;
+    private MecanumDrivetrain drive;
 
     // --- Tunables ---
     private static final double DEADBAND = 0.05;  // stick deadzone
     private static final double EXPO_DRIVE = 2.0; // >1 softens low-end; 1.0 = linear
 
     public void init(HardwareMap hardwareMap) {
-        motorFrontRight = hardwareMap.get(DcMotorEx.class, "motorFrontRight");
-        motorFrontLeft  = hardwareMap.get(DcMotorEx.class, "motorFrontLeft");
-        motorBackRight  = hardwareMap.get(DcMotorEx.class, "motorBackRight");
-        motorBackLeft   = hardwareMap.get(DcMotorEx.class, "motorBackLeft");
-
-        servoTrapRight = hardwareMap.get(CRServo.class, "servoTrapRight");
-        servoTrapLeft  = hardwareMap.get(CRServo.class, "servoTrapLeft");
-
-
-
-        // Make +power = forward for all wheels. Adjust if needed for your build.
-        motorFrontRight.setDirection(DcMotorSimple.Direction.REVERSE);
-        motorBackRight.setDirection(DcMotorSimple.Direction.REVERSE);
-
-        motorFrontLeft.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
-        motorFrontRight.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
-        motorBackLeft.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
-        motorBackRight.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
+        // Right side reversed: +power = forward for all wheels
+        drive = new MecanumDrivetrain(hardwareMap, MecanumDrivetrain.ReversedSide.RIGHT);
     }
 
     /**
@@ -58,72 +31,25 @@ public class autoStruct {
      */
     public void driveFromGamepad(Gamepad gp, boolean squaredInputs, double speedMult) {
         // FTC convention: +y forward, +x right, +r CCW
-        double y = -gp.left_stick_y;   // invert for typical forward on push
-        double x =  gp.left_stick_x;
-        double r =  gp.right_stick_x;
+        double forward = StickShaping.shape(-gp.left_stick_y, DEADBAND, squaredInputs, EXPO_DRIVE);
+        double strafe  = StickShaping.shape( gp.left_stick_x, DEADBAND, squaredInputs, EXPO_DRIVE);
+        double turn    = StickShaping.shape( gp.right_stick_x, DEADBAND, squaredInputs, EXPO_DRIVE);
 
-        // Deadband
-        y = applyDeadband(y, DEADBAND);
-        x = applyDeadband(x, DEADBAND);
-        r = applyDeadband(r, DEADBAND);
-
-        // Expo shaping (optional)
-        if (squaredInputs) {
-            y = expo(y, EXPO_DRIVE);
-            x = expo(x, EXPO_DRIVE);
-            r = expo(r, EXPO_DRIVE);
-        }
-
-        // Apply speed scale
-        y *= speedMult;
-        x *= speedMult;
-        r *= speedMult;
-
-        // Mecanum mixer
-        driveCartesian(x, y, r);
+        drive.drive(forward * speedMult, strafe * speedMult, turn * speedMult);
     }
 
-    /** Direct power set by wheel (already normalized/clipped by caller). */
+    /** Direct power set by wheel (clipped to [-1, 1]). */
     public void setDriverMotorPower(double frontRight, double frontLeft,
                                     double backRight, double backLeft) {
-        motorFrontRight.setPower(Range.clip(frontRight, -1, 1));
-        motorFrontLeft.setPower(Range.clip(frontLeft,  -1, 1));
-        motorBackRight.setPower(Range.clip(backRight,  -1, 1));
-        motorBackLeft.setPower(Range.clip(backLeft,    -1, 1));
+        drive.setWheelPowers(frontLeft, frontRight, backLeft, backRight);
     }
 
     /** Stop all drive motors. */
     public void setDriverPowerZERO() {
-        setDriverMotorPower(0, 0, 0, 0);
+        drive.stop();
     }
 
     /** Simple strafes (normalized). */
-    public void translateRight(double m) { driveCartesian( m, 0, 0); }
-    public void translateLeft (double m) { driveCartesian(-m, 0, 0); }
-
-    // ---------- internals ----------
-
-    /** Standard mecanum cartesian mixer with normalization. */
-    private void driveCartesian(double x, double y, double r) {
-        double fl = y + x + r;
-        double fr = y - x - r;
-        double bl = y - x + r;
-        double br = y + x - r;
-
-        // Normalize so the max magnitude is 1.0
-        double max = Math.max(1.0, Math.max(Math.max(Math.abs(fl), Math.abs(fr)),
-                Math.max(Math.abs(bl), Math.abs(br))));
-        // setDriverMotorPower(frontRight, frontLeft, backRight, backLeft)
-        setDriverMotorPower(fr / max, fl / max, br / max, bl / max);
-    }
-
-    private static double applyDeadband(double v, double d) {
-        return (Math.abs(v) < d) ? 0.0 : v;
-    }
-
-    /** expo = sign(x)*|x|^p; p>=1.0 */
-    private static double expo(double v, double p) {
-        double s = Math.signum(v);
-        return s * Math.pow(Math.abs(v), p);
-    }
+    public void translateRight(double m) { drive.drive(0, m, 0); }
+    public void translateLeft (double m) { drive.drive(0, -m, 0); }
 }

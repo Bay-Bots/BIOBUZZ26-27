@@ -5,7 +5,6 @@ import android.util.Size;
 import com.acmerobotics.dashboard.FtcDashboard;
 import com.acmerobotics.dashboard.telemetry.MultipleTelemetry;
 import com.qualcomm.hardware.gobilda.GoBildaPinpointDriver;
-import com.qualcomm.hardware.lynx.LynxModule;
 import com.qualcomm.robotcore.eventloop.opmode.Autonomous;
 import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
 import com.qualcomm.robotcore.hardware.CRServo;
@@ -95,12 +94,6 @@ public class AutonFirst extends LinearOpMode {
 
     @Override
     public void runOpMode() {
-        // Bulk reads: all encoder/velocity values on a hub arrive in one transaction.
-        // AUTO mode refreshes automatically whenever a value is read a second time.
-        for (LynxModule hub : hardwareMap.getAll(LynxModule.class)) {
-            hub.setBulkCachingMode(LynxModule.BulkCachingMode.AUTO);
-        }
-
         // =========================
         // Hardware init
         // =========================
