@@ -239,7 +239,10 @@ public class MecanumDrive {
 
         voltageSensor = hardwareMap.voltageSensor.iterator().next();
 
-        localizer = new PinpointLocalizer(hardwareMap, PARAMS.inPerTick, pose);
+        // PinpointLocalizer does not exist in this project (it comes from a newer Road Runner
+        // quickstart), so referencing it stopped the code from compiling. Pinpoint localization
+        // is handled by PinpointDrive, which overrides updatePoseEstimate().
+        localizer = new DriveLocalizer();
 
         FlightRecorder.write("MECANUM_PARAMS", PARAMS);
     }
