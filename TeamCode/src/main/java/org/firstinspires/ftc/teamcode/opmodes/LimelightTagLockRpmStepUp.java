@@ -23,11 +23,12 @@ import java.util.List;
  *
  * PART A - LIMELIGHT TAG LOCK (automatic, no buttons)
  *   The Limelight 3A is mounted on a servo that turns it left and right. It finds AprilTag
- *   35 or 36, centers the camera on it, and stays locked on. It runs in three sections, and
- *   the Driver Station shows which one is running:
+ *   34, 35, 36 or 37, centers the camera on it, and stays locked on. If more than one is in
+ *   view, it picks the biggest (closest) one and sticks with it. It runs in three sections,
+ *   and the Driver Station shows which one is running:
  *
  *     SECTION 1 - SEARCH   The servo slowly sweeps the camera back and forth until the Limelight
- *                          sees AprilTag 35 or 36.
+ *                          sees AprilTag 34, 35, 36 or 37.
  *     SECTION 2 - ALIGN    The servo keeps adjusting its position until tx is zero degrees.
  *                          (tx is the Limelight's horizontal angle from the center of its view
  *                          to the tag. It is positive when the tag is to the right.)
@@ -77,7 +78,7 @@ public class LimelightTagLockRpmStepUp extends LinearOpMode {
     // PART A: AprilTag
     // =========================
     private static final int PIPELINE_INDEX = 0;              // Limelight pipeline set up for AprilTags
-    private static final int[] TARGET_TAG_IDS = { 35, 36 };   // the tags this program looks for
+    private static final int[] TARGET_TAG_IDS = { 34, 35, 36, 37 };   // the tags this program looks for
 
     // A result older than this means the Limelight has stopped sending data
     private static final long MAX_RESULT_AGE_MS = 250;
@@ -155,7 +156,7 @@ public class LimelightTagLockRpmStepUp extends LinearOpMode {
     private Section section = Section.SEARCH;
     private double servoPosition = SERVO_START_POS;   // where the servo is being told to go
     private int searchDirection = +1;                 // +1: servo position going up, -1: going down
-    private int followedTagId = NO_TAG;               // the tag (35 or 36) Sections 2 and 3 follow
+    private int followedTagId = NO_TAG;               // the tag (34-37) Sections 2 and 3 follow
 
     // What the camera sees on this loop
     private boolean limelightHasData;
@@ -289,7 +290,7 @@ public class LimelightTagLockRpmStepUp extends LinearOpMode {
 
     // =====================================================================================
     // PART A, SECTION 1 - SEARCH
-    // The servo slowly sweeps the camera until it sees AprilTag 35 or 36.
+    // The servo slowly sweeps the camera until it sees AprilTag 34, 35, 36 or 37.
     // =====================================================================================
     private void section1Search(double dt) {
         if (tag != null) {
@@ -383,8 +384,8 @@ public class LimelightTagLockRpmStepUp extends LinearOpMode {
     }
 
     /**
-     * Section 1 wants tag 35 or 36. Sections 2 and 3 want only the tag they are following,
-     * so the camera does not jump between tags when both are in view.
+     * Section 1 wants tag 34, 35, 36 or 37. Sections 2 and 3 want only the tag they are following,
+     * so the camera does not jump between tags when more than one is in view.
      */
     private boolean isWanted(int tagId) {
         if (section != Section.SEARCH) return tagId == followedTagId;
@@ -466,12 +467,12 @@ public class LimelightTagLockRpmStepUp extends LinearOpMode {
         return String.format("%.1f deg %s of center", Math.abs(txDegrees), txDegrees > 0 ? "right" : "left");
     }
 
-    /** "35 or 36" */
+    /** "34, 35, 36 or 37" */
     private static String targetIdsText() {
         StringBuilder ids = new StringBuilder();
-        for (int targetId : TARGET_TAG_IDS) {
-            if (ids.length() > 0) ids.append(" or ");
-            ids.append(targetId);
+        for (int i = 0; i < TARGET_TAG_IDS.length; i++) {
+            if (i > 0) ids.append(i == TARGET_TAG_IDS.length - 1 ? " or " : ", ");
+            ids.append(TARGET_TAG_IDS[i]);
         }
         return ids.toString();
     }
