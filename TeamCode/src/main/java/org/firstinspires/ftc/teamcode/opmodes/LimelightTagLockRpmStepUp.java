@@ -84,7 +84,7 @@ public class LimelightTagLockRpmStepUp extends LinearOpMode {
     private static final long MAX_RESULT_AGE_MS = 250;
 
     // =========================
-    // PART A: Camera servo
+    // PART A: Camera servo THESE NEED TO BE MODIFIED SO YOU DONT BREAK THE WHOLE THING
     // =========================
     private static final double SERVO_MIN_POS   = 0.0;   // ends of the sweep
     private static final double SERVO_MAX_POS   = 1.0;
