@@ -58,10 +58,11 @@ import java.util.List;
  *   it uses the built-in TABLE_DISTANCE_IN / TABLE_RPM below, whose RPMs are placeholders.
  *   The Driver Station shows which table is in use.
  *
- *   Distance comes from the Limelight's 3D AprilTag data. If the Driver Station says
- *   "no 3D data", the AprilTag pipeline is not producing 3D results: check the pipeline's 3D
- *   settings in the Limelight web interface, and set the tag size to the size of the printed
- *   tags so the distance is correct.
+ *   HOW DISTANCE IS MEASURED (see ShooterRpmTable): from the Limelight's 3D AprilTag data when
+ *   the Limelight sends it, otherwise estimated from ty (the tag's angle above the center of
+ *   the camera's view) and the camera geometry in ShooterRpmTable: CAMERA_LENS_HEIGHT_IN,
+ *   TAG_CENTER_HEIGHT_IN and CAMERA_TILT_DEG. MEASURE THOSE ON YOUR ROBOT. The Driver Station
+ *   shows which method is in use. Without a distance, the motor stays at DEFAULT_RPM.
  *
  * Robot Configuration:
  *   - Limelight 3A (plugged into USB, listed with the webcams)        name: "limelight"
@@ -215,7 +216,9 @@ public class LimelightTagLockAutoRpm extends LinearOpMode {
     private boolean haveDistance = false;    // true once a good distance has been measured
     private double smoothedDistanceIn = 0.0; // filtered distance the RPM is based on
     private double rawDistanceIn = 0.0;      // this loop's reading (0 if none)
-    private boolean noDataFromTag = false;   // tag in view but the Limelight sent no 3D data
+    private boolean noDataFromTag = false;   // tag in view but no usable distance from it
+    private ShooterRpmTable.DistanceSource distanceSource = ShooterRpmTable.DistanceSource.NONE;
+    private double lastTyDeg = 0.0;          // ty of the tag this loop, for the Driver Station
 
     private ShooterRpmTable table;           // the DISTANCE -> RPM table in use
     private boolean tableFromTuner = false;  // true: loaded from the Shooter Distance Tuner's file
@@ -346,15 +349,20 @@ public class LimelightTagLockAutoRpm extends LinearOpMode {
     private void measureDistance() {
         rawDistanceIn = 0.0;
         noDataFromTag = false;
+        distanceSource = ShooterRpmTable.DistanceSource.NONE;
         if (tag == null) return;
 
-        double distance = ShooterRpmTable.floorDistanceInches(tag);
+        // 3D data if the Limelight sends it, otherwise the ty estimate (see ShooterRpmTable)
+        ShooterRpmTable.DistanceReading reading = ShooterRpmTable.measureFloorDistance(tag);
+        lastTyDeg = tag.getTargetYDegrees();
+        double distance = reading.inches;
         if (distance < MIN_VALID_DISTANCE_IN || distance > MAX_VALID_DISTANCE_IN) {
             noDataFromTag = true;
             return;
         }
 
         rawDistanceIn = distance;
+        distanceSource = reading.source;
         if (!haveDistance) {
             smoothedDistanceIn = distance;   // first reading: start the filter right there
             haveDistance = true;
@@ -543,8 +551,12 @@ public class LimelightTagLockAutoRpm extends LinearOpMode {
         telemetry.addLine();
         if (rawDistanceIn > 0.0) {
             telemetry.addData("Floor distance", "%.1f in (smoothed %.1f in)", rawDistanceIn, smoothedDistanceIn);
+            telemetry.addData("Measured with", distanceSource == ShooterRpmTable.DistanceSource.TAG_3D
+                    ? "Limelight 3D data"
+                    : String.format("ty estimate (ty %.1f deg, no 3D data from Limelight)", lastTyDeg));
         } else if (noDataFromTag) {
-            telemetry.addData("Floor distance", "no 3D data from Limelight (check pipeline 3D settings)");
+            telemetry.addData("Floor distance", "CAN'T MEASURE (ty %.1f deg). No 3D data from the Limelight,"
+                    + " and the ty estimate is off: check the camera heights/tilt in ShooterRpmTable", lastTyDeg);
         } else if (haveDistance) {
             telemetry.addData("Floor distance", "tag not in view (last %.1f in)", smoothedDistanceIn);
         } else {

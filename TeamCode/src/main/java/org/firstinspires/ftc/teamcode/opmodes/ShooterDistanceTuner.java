@@ -63,9 +63,13 @@ import java.util.List;
  *     the Limelight, on a servo port, type Servo                      name: "camServo"
  *   - goBILDA 6000 RPM motor, on a motor port                         name: "spinMotor"
  *
- * Limelight pipeline: an AprilTag pipeline (family 36h11) with 3D results turned on, and the
- * tag size set to the size of the printed tags. If the Driver Station says "no 3D data", check
- * the pipeline's 3D settings in the Limelight web interface.
+ * Distance is measured the same way as in LimelightTagLockAutoRpm (see ShooterRpmTable): from
+ * the Limelight's 3D AprilTag data when it sends it, otherwise estimated from ty and the camera
+ * geometry in ShooterRpmTable (CAMERA_LENS_HEIGHT_IN, TAG_CENTER_HEIGHT_IN, CAMERA_TILT_DEG).
+ * The "Measured with" line shows which. When it is the ty estimate, the "Tilt check" line shows
+ * the CAMERA_TILT_DEG that matches the asked-for distance: put the robot exactly at the
+ * distance with a tape measure and copy that number into ShooterRpmTable. Set the tilt BEFORE
+ * tuning, because the saved distances depend on it.
  */
 @TeleOp(name = "Shooter Distance Tuner", group = "Test")
 public class ShooterDistanceTuner extends LinearOpMode {
@@ -234,6 +238,9 @@ public class ShooterDistanceTuner extends LinearOpMode {
     private double rawDistanceIn = 0.0;          // this loop's reading (0 if none)
     private boolean noDataFromTag = false;       // tag in view but the Limelight sent no 3D data
     private double cameraBelowTagIn = 0.0;
+    private ShooterRpmTable.DistanceSource distanceSource = ShooterRpmTable.DistanceSource.NONE;
+    private double lastTyDeg = 0.0;              // ty of the tag this loop
+    private boolean tagInViewNow = false;        // the tag is in view this loop
     private final ElapsedTime sinceDistance = new ElapsedTime();
 
     private final ElapsedTime readyTimer = new ElapsedTime();
@@ -539,15 +546,21 @@ public class ShooterDistanceTuner extends LinearOpMode {
     private void measureDistance() {
         rawDistanceIn = 0.0;
         noDataFromTag = false;
+        distanceSource = ShooterRpmTable.DistanceSource.NONE;
+        tagInViewNow = tag != null;
         if (tag == null) return;
 
-        double distance = ShooterRpmTable.floorDistanceInches(tag);
+        // 3D data if the Limelight sends it, otherwise the ty estimate (see ShooterRpmTable)
+        ShooterRpmTable.DistanceReading reading = ShooterRpmTable.measureFloorDistance(tag);
+        lastTyDeg = tag.getTargetYDegrees();
+        double distance = reading.inches;
         if (distance < MIN_VALID_DISTANCE_IN || distance > MAX_VALID_DISTANCE_IN) {
             noDataFromTag = true;
             return;
         }
 
         rawDistanceIn = distance;
+        distanceSource = reading.source;
         cameraBelowTagIn = ShooterRpmTable.cameraBelowTagInches(tag);
         if (!haveDistance || sinceDistance.seconds() > DISTANCE_FRESH_SEC) {
             smoothedDistanceIn = distance;   // first reading, or the old one is stale: start over here
@@ -725,6 +738,17 @@ public class ShooterDistanceTuner extends LinearOpMode {
         telemetry.addData("SHOOTER TUNER", "distance %d of %d", distanceIndex + 1, TEST_DISTANCES_IN.length);
         telemetry.addLine(String.format("1) Put the Limelight lens %.0f in from the floor spot under the tag", askedIn));
         telemetry.addData("   Camera measures", distanceGuide(askedIn));
+        if (rawDistanceIn > 0.0) {
+            telemetry.addData("   Measured with", distanceSource == ShooterRpmTable.DistanceSource.TAG_3D
+                    ? "Limelight 3D data"
+                    : String.format("ty estimate (ty %.1f deg, no 3D data from Limelight)", lastTyDeg));
+        }
+        if (tagInViewNow && distanceSource != ShooterRpmTable.DistanceSource.TAG_3D
+                && ShooterRpmTable.DISTANCE_METHOD != ShooterRpmTable.DistanceMethod.TAG_3D_ONLY) {
+            // Calibration aid for the ty estimate: the tilt that matches the asked-for distance
+            telemetry.addData("   Tilt check", "if the lens is exactly %.0f in away, CAMERA_TILT_DEG = %.1f (now %.1f)",
+                    askedIn, ShooterRpmTable.tiltForKnownDistanceDeg(lastTyDeg, askedIn), ShooterRpmTable.CAMERA_TILT_DEG);
+        }
         telemetry.addLine("2) Wait for READY, then feed ONE ball");
         telemetry.addData("   Test RPM", "%.0f  (actual %.0f)  %s", testRpm, actualRpm(), readyText());
         telemetry.addLine("3) A = went in | B = too much | X = too little");
@@ -761,7 +785,7 @@ public class ShooterDistanceTuner extends LinearOpMode {
         boolean atEndOfTravel = servoPosition <= SERVO_MIN_POS || servoPosition >= SERVO_MAX_POS;
         telemetry.addData("Servo position", atEndOfTravel ? "%.3f (end of travel)" : "%.3f", servoPosition);
 
-        if (haveDistance) {
+        if (haveDistance && distanceSource == ShooterRpmTable.DistanceSource.TAG_3D) {
             // Sanity check: should match the real height difference between the tag center and the lens
             telemetry.addData("Height check", "lens is %.1f in %s the tag center",
                     Math.abs(cameraBelowTagIn), cameraBelowTagIn >= 0 ? "below" : "above");
@@ -798,7 +822,10 @@ public class ShooterDistanceTuner extends LinearOpMode {
             if (Math.abs(off) <= POSITION_TOL_IN) return String.format("%.1f in - OK", smoothedDistanceIn);
             return String.format("%.1f in - move %s %.1f in", smoothedDistanceIn, off > 0 ? "CLOSER" : "BACK", Math.abs(off));
         }
-        if (noDataFromTag) return "tag in view but no 3D data (check the Limelight pipeline's 3D settings)";
+        if (noDataFromTag) {
+            return String.format("CAN'T MEASURE (ty %.1f deg): no 3D data from the Limelight, and the ty"
+                    + " estimate is off: check the camera heights/tilt in ShooterRpmTable", lastTyDeg);
+        }
         return "tag not in view";
     }
 

@@ -24,9 +24,18 @@ import java.util.Locale;
  *   - LimelightTagLockAutoRpm loads the saved table and sets the motor speed from it.
  *
  * DISTANCE = the distance along the floor from the spot directly under the center of the
- * AprilTag to the spot directly under the Limelight's lens, in inches. It comes from the
- * Limelight's 3D AprilTag data ("camera pose in target space"), so turning the camera servo
- * does not change it. The tag must be mounted upright (on a wall), like the field tags.
+ * AprilTag to the spot directly under the Limelight's lens, in inches. The tag must be mounted
+ * upright (on a wall), like the field tags. It is measured one of two ways:
+ *
+ *   1. From the Limelight's 3D AprilTag data ("camera pose in target space"), when the
+ *      Limelight sends it. This needs no settings here, but the Limelight only sends 3D data
+ *      when its AprilTag pipeline is set up for it (see the Limelight web interface), and the
+ *      tag size there must match the printed tags.
+ *   2. Otherwise, estimated from ty (the tag's angle above the center of the camera's view)
+ *      and the camera geometry below: CAMERA_LENS_HEIGHT_IN, TAG_CENTER_HEIGHT_IN and
+ *      CAMERA_TILT_DEG. MEASURE THESE ON YOUR ROBOT, or the distances will be off.
+ *
+ * Turning the camera servo left and right does not change either measurement.
  *
  * The saved file is /sdcard/FIRST/settings/shooter_rpm_table.csv on the Robot Controller.
  * It is plain text, one point per line: distance in inches, then RPM (for example "48.0,3100").
@@ -35,6 +44,33 @@ import java.util.Locale;
 public final class ShooterRpmTable {
 
     public static final String FILE_NAME = "shooter_rpm_table.csv";
+
+    // =====================================================================================
+    // Camera geometry for measuring distance WITHOUT the Limelight's 3D data (method 2 above).
+    // THESE ARE PLACEHOLDERS: MEASURE THEM ON YOUR ROBOT.
+    // =====================================================================================
+    /** Height of the center of the Limelight's lens above the floor, in inches */
+    public static final double CAMERA_LENS_HEIGHT_IN = 10.0;
+
+    /** Height of the center of the AprilTag above the floor, in inches */
+    public static final double TAG_CENTER_HEIGHT_IN = 30.0;
+
+    /**
+     * How far the Limelight is tilted UP from level, in degrees (negative if tilted down).
+     * Hard to measure by hand: the Shooter Distance Tuner's "Tilt check" line shows the value
+     * that matches where you put the robot.
+     */
+    public static final double CAMERA_TILT_DEG = 15.0;
+
+    /**
+     * AUTO: 3D data when the Limelight sends it, otherwise the ty estimate (recommended).
+     * TAG_3D_ONLY: only 3D data (no distance at all without it).
+     * TY_ONLY: always the ty estimate (use this if the 3D data comes and goes, so the
+     *          distance does not jump between the two methods).
+     */
+    public enum DistanceMethod { AUTO, TAG_3D_ONLY, TY_ONLY }
+
+    public static final DistanceMethod DISTANCE_METHOD = DistanceMethod.AUTO;
 
     // Distances (inches) and the RPM for each, sorted from closest to farthest
     private final double[] distanceIn;
@@ -157,18 +193,85 @@ public final class ShooterRpmTable {
     // Distance to the tag
     // =====================================================================================
 
+    /** Where a distance reading came from */
+    public enum DistanceSource { TAG_3D, TY_ESTIMATE, NONE }
+
+    /** A floor distance in inches and where it came from. inches is 0 when source is NONE. */
+    public static final class DistanceReading {
+        public final double inches;
+        public final DistanceSource source;
+
+        DistanceReading(double inches, DistanceSource source) {
+            this.inches = inches;
+            this.source = source;
+        }
+    }
+
+    private static final DistanceReading NO_READING = new DistanceReading(0.0, DistanceSource.NONE);
+
     /**
      * Floor distance from the spot under the tag's center to the spot under the Limelight lens,
-     * in inches. Returns 0 if the Limelight sent no 3D data for this tag.
+     * in inches, using DISTANCE_METHOD: the Limelight's 3D data when it sends it, otherwise an
+     * estimate from ty and the camera geometry above.
+     */
+    public static DistanceReading measureFloorDistance(LLResultTypes.FiducialResult tag) {
+        if (tag == null) return NO_READING;
+
+        if (DISTANCE_METHOD != DistanceMethod.TY_ONLY) {
+            double from3d = floorDistanceFrom3dInches(tag);
+            if (from3d > 0.0) return new DistanceReading(from3d, DistanceSource.TAG_3D);
+            if (DISTANCE_METHOD == DistanceMethod.TAG_3D_ONLY) return NO_READING;
+        }
+
+        double fromTy = floorDistanceFromTyInches(tag.getTargetYDegrees());
+        return fromTy > 0.0 ? new DistanceReading(fromTy, DistanceSource.TY_ESTIMATE) : NO_READING;
+    }
+
+    /** Just the inches from measureFloorDistance (0 if it cannot be measured). */
+    public static double floorDistanceInches(LLResultTypes.FiducialResult tag) {
+        return measureFloorDistance(tag).inches;
+    }
+
+    /**
+     * Floor distance from the Limelight's 3D data, in inches. Returns 0 if the Limelight sent no
+     * 3D data for this tag (the SDK then reports all zeros).
      *
      * In the tag's own coordinates (Limelight "target space"), X points sideways along the tag,
      * Y points down, and Z points straight out of the tag. For an upright tag, X and Z are both
      * level with the floor, so the floor distance is the length of (X, Z) and Y is the height.
      */
-    public static double floorDistanceInches(LLResultTypes.FiducialResult tag) {
+    public static double floorDistanceFrom3dInches(LLResultTypes.FiducialResult tag) {
         Position p = cameraPositionInTagSpaceInches(tag);
         if (p == null) return 0.0;
         return Math.hypot(p.x, p.z);
+    }
+
+    /**
+     * Floor distance estimated from ty (how far above the center of the camera's view the tag
+     * is, in degrees) and the camera geometry above. This is the Limelight's standard
+     * "estimating distance" method and needs no 3D data:
+     *
+     *     distance = (TAG_CENTER_HEIGHT_IN - CAMERA_LENS_HEIGHT_IN) / tan(CAMERA_TILT_DEG + ty)
+     *
+     * Returns 0 if the geometry does not give a sensible answer (for example the tag and the
+     * camera are at the same height, or the angles say the tag is behind the camera).
+     */
+    public static double floorDistanceFromTyInches(double tyDegrees) {
+        double heightDiff = TAG_CENTER_HEIGHT_IN - CAMERA_LENS_HEIGHT_IN;
+        double tan = Math.tan(Math.toRadians(CAMERA_TILT_DEG + tyDegrees));
+        if (Math.abs(tan) < 1e-3) return 0.0;
+
+        double distance = heightDiff / tan;
+        return distance > 0.0 ? distance : 0.0;
+    }
+
+    /**
+     * Calibration helper: the CAMERA_TILT_DEG that would make the ty estimate read exactly
+     * knownFloorIn. Put the robot at a measured distance and compare this to CAMERA_TILT_DEG.
+     */
+    public static double tiltForKnownDistanceDeg(double tyDegrees, double knownFloorIn) {
+        double heightDiff = TAG_CENTER_HEIGHT_IN - CAMERA_LENS_HEIGHT_IN;
+        return Math.toDegrees(Math.atan2(heightDiff, knownFloorIn)) - tyDegrees;
     }
 
     /**
