@@ -13,10 +13,6 @@ import com.qualcomm.robotcore.hardware.Servo;
 import com.qualcomm.robotcore.util.ElapsedTime;
 import com.qualcomm.robotcore.util.Range;
 
-import org.firstinspires.ftc.robotcore.external.navigation.DistanceUnit;
-import org.firstinspires.ftc.robotcore.external.navigation.Pose3D;
-import org.firstinspires.ftc.robotcore.external.navigation.Position;
-
 import java.util.List;
 
 /*
@@ -46,19 +42,21 @@ import java.util.List;
  *
  * PART B - AUTO RPM FROM TAG DISTANCE for a goBILDA 6000 RPM (5203 Yellow Jacket, 1:1) motor
  *   When you press PLAY the motor spins at DEFAULT_RPM (2500) until the camera sees a tag.
- *   While a tag is in view, the Limelight measures the straight-line distance from the camera
- *   to the tag, and the motor speed comes from the DISTANCE -> RPM table below (in between
- *   table rows it blends the two nearest rows). If the tag goes out of view, the motor holds
- *   the last speed it had. Speed is closed-loop (setVelocity), so it holds RPM under load.
+ *   While a tag is in view, the Limelight measures the floor distance to the tag (from the
+ *   spot under the tag's center to the spot under the Limelight lens), and the motor speed
+ *   comes from a DISTANCE -> RPM table (in between table rows it blends the two nearest rows).
+ *   If the tag goes out of view, the motor holds the last speed it had. Speed is closed-loop
+ *   (setVelocity), so it holds RPM under load.
  *
  *   Buttons (gamepad1):
  *     - Dpad down:       STOP (motor coasts down)
  *     - A while stopped: restart (back to automatic speed)
  *
- *   THE TABLE NEEDS TUNING. The RPM numbers in it are placeholders. To fill it in: park at a
- *   distance, read "Distance" on the Driver Station, find the RPM that shoots best from there
- *   (for example with LimelightTagLockRpmStepUp), and write that pair into the table. Repeat
- *   at a few distances from closest to farthest.
+ *   WHERE THE TABLE COMES FROM: run the "Shooter Distance Tuner" OpMode (ShooterDistanceTuner).
+ *   It has you take test shots from several distances and saves the table on the Robot
+ *   Controller. This OpMode loads that saved table when it starts. If there is no saved table,
+ *   it uses the built-in TABLE_DISTANCE_IN / TABLE_RPM below, whose RPMs are placeholders.
+ *   The Driver Station shows which table is in use.
  *
  *   Distance comes from the Limelight's 3D AprilTag data. If the Driver Station says
  *   "no 3D data", the AprilTag pipeline is not producing 3D results: check the pipeline's 3D
@@ -158,12 +156,13 @@ public class LimelightTagLockAutoRpm extends LinearOpMode {
     private static final double DEFAULT_RPM = 2500.0;
 
     // =========================
-    // PART B: DISTANCE -> RPM table. THE RPM NUMBERS ARE PLACEHOLDERS: TUNE THEM ON THE ROBOT.
+    // PART B: Built-in DISTANCE -> RPM table. ONLY USED IF THERE IS NO TABLE SAVED BY THE
+    // SHOOTER DISTANCE TUNER. THE RPM NUMBERS ARE PLACEHOLDERS.
     // =========================
-    // Distance from the camera to the tag, in inches (closest first). Each distance pairs with
-    // the RPM directly below it. Closer than the first row uses the first RPM; farther than the
-    // last row uses the last RPM. You can add or remove rows, as long as both lists stay the
-    // same length and the distances keep going up.
+    // Floor distance to the tag, in inches (closest first). Each distance pairs with the RPM
+    // directly below it. Closer than the first row uses the first RPM; farther than the last
+    // row uses the last RPM. You can add or remove rows, as long as both lists stay the same
+    // length. (The tuner's finish screen shows its table in this form, if you want to paste it.)
     private static final double[] TABLE_DISTANCE_IN = {   24,   36,   48,   60,   72,   96,  120 };
     private static final double[] TABLE_RPM         = { 2500, 2800, 3100, 3400, 3700, 4300, 4900 };
 
@@ -218,6 +217,9 @@ public class LimelightTagLockAutoRpm extends LinearOpMode {
     private double rawDistanceIn = 0.0;      // this loop's reading (0 if none)
     private boolean noDataFromTag = false;   // tag in view but the Limelight sent no 3D data
 
+    private ShooterRpmTable table;           // the DISTANCE -> RPM table in use
+    private boolean tableFromTuner = false;  // true: loaded from the Shooter Distance Tuner's file
+
     @Override
     public void runOpMode() {
         limelight = hardwareMap.get(Limelight3A.class, LIMELIGHT_NAME);
@@ -234,6 +236,11 @@ public class LimelightTagLockAutoRpm extends LinearOpMode {
         // A servo cannot report where it is, so send it to a known position to start from
         camServo.setPosition(servoPosition);
 
+        // Use the table saved by the Shooter Distance Tuner if there is one, else the built-in one
+        ShooterRpmTable saved = ShooterRpmTable.loadOrNull();
+        tableFromTuner = saved != null;
+        table = tableFromTuner ? saved : new ShooterRpmTable(TABLE_DISTANCE_IN, TABLE_RPM);
+
         // Send telemetry often so the Driver Station keeps up with the camera
         telemetry.setMsTransmissionInterval(11);
 
@@ -248,6 +255,7 @@ public class LimelightTagLockAutoRpm extends LinearOpMode {
         limelight.start();
 
         telemetry.addData("Status", "Ready. Press Play to search for AprilTag %s", targetIdsText());
+        telemetry.addData("Table", tableText());
         telemetry.addLine("Motor speed is automatic from tag distance (2500 RPM until a tag is seen)");
         telemetry.addLine("Dpad down: STOP | A while stopped: restart");
         telemetry.update();
@@ -311,7 +319,7 @@ public class LimelightTagLockAutoRpm extends LinearOpMode {
             if (rawDistanceIn > 0.0) {
                 // Tag in view with a good distance: speed from the table
                 motorMode = MotorMode.AUTO;
-                targetRpm = Range.clip(rpmForDistance(smoothedDistanceIn), 0.0, MAX_RPM);
+                targetRpm = Range.clip(table.rpmFor(smoothedDistanceIn), 0.0, MAX_RPM);
             } else if (haveDistance) {
                 // No distance this loop: keep the last speed
                 motorMode = MotorMode.HOLDING;
@@ -331,16 +339,16 @@ public class LimelightTagLockAutoRpm extends LinearOpMode {
     }
 
     /**
-     * Reads the straight-line distance from the camera to the tag being tracked, in inches,
-     * into rawDistanceIn (0 if there is no good reading this loop), and updates the smoothed
-     * distance the RPM is based on.
+     * Reads the floor distance to the tag being tracked, in inches, into rawDistanceIn (0 if
+     * there is no good reading this loop), and updates the smoothed distance the RPM is based
+     * on. Uses ShooterRpmTable's measurement, the same one the Shooter Distance Tuner saves.
      */
     private void measureDistance() {
         rawDistanceIn = 0.0;
         noDataFromTag = false;
         if (tag == null) return;
 
-        double distance = tagDistanceInches(tag);
+        double distance = ShooterRpmTable.floorDistanceInches(tag);
         if (distance < MIN_VALID_DISTANCE_IN || distance > MAX_VALID_DISTANCE_IN) {
             noDataFromTag = true;
             return;
@@ -355,34 +363,10 @@ public class LimelightTagLockAutoRpm extends LinearOpMode {
         }
     }
 
-    /**
-     * Straight-line distance from the camera to the tag, in inches, from the Limelight's
-     * "target pose in camera space". Because it is measured from the camera, turning the
-     * camera servo does not change it. Returns 0 if the Limelight sent no 3D data.
-     */
-    private static double tagDistanceInches(LLResultTypes.FiducialResult t) {
-        Pose3D pose = t.getTargetPoseCameraSpace();
-        if (pose == null || pose.getPosition() == null) return 0.0;
-
-        Position p = pose.getPosition().toUnit(DistanceUnit.INCH);
-        return Math.sqrt(p.x * p.x + p.y * p.y + p.z * p.z);
-    }
-
-    /** RPM for a distance, blending between the two nearest rows of the table. */
-    private static double rpmForDistance(double distanceIn) {
-        int last = TABLE_DISTANCE_IN.length - 1;
-        if (distanceIn <= TABLE_DISTANCE_IN[0]) return TABLE_RPM[0];
-        if (distanceIn >= TABLE_DISTANCE_IN[last]) return TABLE_RPM[last];
-
-        for (int i = 1; i <= last; i++) {
-            if (distanceIn <= TABLE_DISTANCE_IN[i]) {
-                double d0 = TABLE_DISTANCE_IN[i - 1];
-                double d1 = TABLE_DISTANCE_IN[i];
-                double fraction = (distanceIn - d0) / (d1 - d0);
-                return TABLE_RPM[i - 1] + fraction * (TABLE_RPM[i] - TABLE_RPM[i - 1]);
-            }
-        }
-        return TABLE_RPM[last];
+    private String tableText() {
+        return tableFromTuner
+                ? String.format("from Shooter Distance Tuner (%d points)", table.size())
+                : "built-in PLACEHOLDER table (run Shooter Distance Tuner to make a real one)";
     }
 
     private static double rpmToTicksPerSec(double rpm) {
@@ -558,14 +542,15 @@ public class LimelightTagLockAutoRpm extends LinearOpMode {
 
         telemetry.addLine();
         if (rawDistanceIn > 0.0) {
-            telemetry.addData("Distance", "%.1f in (smoothed %.1f in)", rawDistanceIn, smoothedDistanceIn);
+            telemetry.addData("Floor distance", "%.1f in (smoothed %.1f in)", rawDistanceIn, smoothedDistanceIn);
         } else if (noDataFromTag) {
-            telemetry.addData("Distance", "no 3D data from Limelight (check pipeline 3D settings)");
+            telemetry.addData("Floor distance", "no 3D data from Limelight (check pipeline 3D settings)");
         } else if (haveDistance) {
-            telemetry.addData("Distance", "tag not in view (last %.1f in)", smoothedDistanceIn);
+            telemetry.addData("Floor distance", "tag not in view (last %.1f in)", smoothedDistanceIn);
         } else {
-            telemetry.addData("Distance", "no tag seen yet");
+            telemetry.addData("Floor distance", "no tag seen yet");
         }
+        telemetry.addData("Table", tableText());
 
         switch (motorMode) {
             case WAITING_FOR_TAG: telemetry.addData("Motor", "DEFAULT %.0f RPM until a tag is seen", DEFAULT_RPM); break;
