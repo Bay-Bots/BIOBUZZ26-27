@@ -25,15 +25,16 @@ import java.util.Locale;
  *
  * DISTANCE = the distance along the floor from the spot directly under the center of the
  * AprilTag to the spot directly under the Limelight's lens, in inches. The tag must be mounted
- * upright (on a wall), like the field tags. It is measured one of two ways:
+ * upright (on a wall), like the field tags. DISTANCE_METHOD below picks how it is measured:
  *
- *   1. From the Limelight's 3D AprilTag data ("camera pose in target space"), when the
- *      Limelight sends it. This needs no settings here, but the Limelight only sends 3D data
- *      when its AprilTag pipeline is set up for it (see the Limelight web interface), and the
- *      tag size there must match the printed tags.
- *   2. Otherwise, estimated from ty (the tag's angle above the center of the camera's view)
- *      and the camera geometry below: CAMERA_LENS_HEIGHT_IN, TAG_CENTER_HEIGHT_IN and
- *      CAMERA_TILT_DEG. MEASURE THESE ON YOUR ROBOT, or the distances will be off.
+ *   1. From the Limelight's 3D AprilTag data ("camera pose in target space"). This is the
+ *      default (TAG_3D_ONLY), and it has been checked against a tape measure on the robot.
+ *      It needs no settings here, but the tag size in the Limelight's AprilTag pipeline must
+ *      match the printed tags.
+ *   2. Estimated from ty (the tag's angle above the center of the camera's view) and the
+ *      camera geometry below: CAMERA_LENS_HEIGHT_IN, TAG_CENTER_HEIGHT_IN and CAMERA_TILT_DEG.
+ *      Only used with DISTANCE_METHOD AUTO or TY_ONLY, and only correct once those three
+ *      numbers are measured on the robot.
  *
  * Turning the camera servo left and right does not change either measurement.
  *
@@ -63,14 +64,25 @@ public final class ShooterRpmTable {
     public static final double CAMERA_TILT_DEG = 15.0;
 
     /**
-     * AUTO: 3D data when the Limelight sends it, otherwise the ty estimate (recommended).
-     * TAG_3D_ONLY: only 3D data (no distance at all without it).
-     * TY_ONLY: always the ty estimate (use this if the 3D data comes and goes, so the
-     *          distance does not jump between the two methods).
+     * TAG_3D_ONLY (default): only the Limelight's 3D data. A frame without it gives no distance,
+     *             so the motor just holds its speed for that frame.
+     * AUTO:       3D data when the Limelight sends it, otherwise the ty estimate. Only use this
+     *             after measuring the camera geometry above, or a frame without 3D data gives a
+     *             wrong distance and the motor speed jumps.
+     * TY_ONLY:    always the ty estimate (for a Limelight setup that never sends 3D data).
      */
     public enum DistanceMethod { AUTO, TAG_3D_ONLY, TY_ONLY }
 
-    public static final DistanceMethod DISTANCE_METHOD = DistanceMethod.AUTO;
+    public static final DistanceMethod DISTANCE_METHOD = DistanceMethod.TAG_3D_ONLY;
+
+    /** What to tell the driver when a tag is in view but gives no distance. */
+    public static String noDistanceHelp() {
+        if (DISTANCE_METHOD == DistanceMethod.TAG_3D_ONLY) {
+            return "no 3D data from the Limelight for this tag (check the AprilTag pipeline's 3D settings)";
+        }
+        return "no 3D data from the Limelight, and the ty estimate is off"
+                + " (check CAMERA_LENS_HEIGHT_IN / TAG_CENTER_HEIGHT_IN / CAMERA_TILT_DEG in ShooterRpmTable)";
+    }
 
     // Distances (inches) and the RPM for each, sorted from closest to farthest
     private final double[] distanceIn;

@@ -58,11 +58,10 @@ import java.util.List;
  *   it uses the built-in TABLE_DISTANCE_IN / TABLE_RPM below, whose RPMs are placeholders.
  *   The Driver Station shows which table is in use.
  *
- *   HOW DISTANCE IS MEASURED (see ShooterRpmTable): from the Limelight's 3D AprilTag data when
- *   the Limelight sends it, otherwise estimated from ty (the tag's angle above the center of
- *   the camera's view) and the camera geometry in ShooterRpmTable: CAMERA_LENS_HEIGHT_IN,
- *   TAG_CENTER_HEIGHT_IN and CAMERA_TILT_DEG. MEASURE THOSE ON YOUR ROBOT. The Driver Station
- *   shows which method is in use. Without a distance, the motor stays at DEFAULT_RPM.
+ *   HOW DISTANCE IS MEASURED: see ShooterRpmTable. By default, from the Limelight's 3D AprilTag
+ *   data (DISTANCE_METHOD there can switch to an estimate from ty and the camera geometry).
+ *   The Driver Station shows which method is in use. Until a distance has been measured, the
+ *   motor runs at DEFAULT_RPM; when the tag is out of view, it holds the last speed.
  *
  * Robot Configuration:
  *   - Limelight 3A (plugged into USB, listed with the webcams)        name: "limelight"
@@ -574,8 +573,7 @@ public class LimelightTagLockAutoRpm extends LinearOpMode {
                     ? "Limelight 3D data"
                     : String.format("ty estimate (ty %.1f deg, no 3D data from Limelight)", lastTyDeg));
         } else if (noDataFromTag) {
-            telemetry.addData("Floor distance", "CAN'T MEASURE (ty %.1f deg). No 3D data from the Limelight,"
-                    + " and the ty estimate is off: check the camera heights/tilt in ShooterRpmTable", lastTyDeg);
+            telemetry.addData("Floor distance", "CAN'T MEASURE: " + ShooterRpmTable.noDistanceHelp());
         } else if (haveDistance) {
             telemetry.addData("Floor distance", "tag not in view (last %.1f in)", smoothedDistanceIn);
         } else {

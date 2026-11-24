@@ -63,13 +63,12 @@ import java.util.List;
  *     the Limelight, on a servo port, type Servo                      name: "camServo"
  *   - goBILDA 6000 RPM motor, on a motor port                         name: "spinMotor"
  *
- * Distance is measured the same way as in LimelightTagLockAutoRpm (see ShooterRpmTable): from
- * the Limelight's 3D AprilTag data when it sends it, otherwise estimated from ty and the camera
- * geometry in ShooterRpmTable (CAMERA_LENS_HEIGHT_IN, TAG_CENTER_HEIGHT_IN, CAMERA_TILT_DEG).
- * The "Measured with" line shows which. When it is the ty estimate, the "Tilt check" line shows
- * the CAMERA_TILT_DEG that matches the asked-for distance: put the robot exactly at the
- * distance with a tape measure and copy that number into ShooterRpmTable. Set the tilt BEFORE
- * tuning, because the saved distances depend on it.
+ * Distance is measured the same way as in LimelightTagLockAutoRpm (see ShooterRpmTable): by
+ * default from the Limelight's 3D AprilTag data. The "Measured with" line shows the method.
+ * Only if ShooterRpmTable's DISTANCE_METHOD is switched to use the ty estimate: the "Tilt check"
+ * line shows the CAMERA_TILT_DEG that matches the asked-for distance (put the robot exactly at
+ * the distance with a tape measure and copy that number into ShooterRpmTable). Set the tilt
+ * BEFORE tuning, because the saved distances depend on it.
  */
 @TeleOp(name = "Shooter Distance Tuner", group = "Test")
 public class ShooterDistanceTuner extends LinearOpMode {
@@ -823,8 +822,7 @@ public class ShooterDistanceTuner extends LinearOpMode {
             return String.format("%.1f in - move %s %.1f in", smoothedDistanceIn, off > 0 ? "CLOSER" : "BACK", Math.abs(off));
         }
         if (noDataFromTag) {
-            return String.format("CAN'T MEASURE (ty %.1f deg): no 3D data from the Limelight, and the ty"
-                    + " estimate is off: check the camera heights/tilt in ShooterRpmTable", lastTyDeg);
+            return "CAN'T MEASURE: " + ShooterRpmTable.noDistanceHelp();
         }
         return "tag not in view";
     }
