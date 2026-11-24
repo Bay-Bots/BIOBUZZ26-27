@@ -68,6 +68,8 @@ import java.util.List;
  *   - Standard position servo (not continuous rotation) that turns
  *     the Limelight, on a servo port, type Servo                      name: "camServo"
  *   - goBILDA 6000 RPM motor, on a motor port                         name: "spinMotor"
+ *   - goBILDA RGB Indicator Light (optional) on a servo port,
+ *     type Servo. Shows the tag lock's state, see TagLockLight        name: "rgbLight"
  *
  * Limelight pipeline (set up in the Limelight web interface):
  *   - PIPELINE_INDEX must be an AprilTag pipeline (family 36h11)
@@ -182,6 +184,7 @@ public class LimelightTagLockAutoRpm extends LinearOpMode {
     // =========================
     private Limelight3A limelight;
     private Servo camServo;
+    private TagLockLight light;   // goBILDA RGB light showing the tag lock's state
     private DcMotorEx motor;
 
     // =========================
@@ -226,6 +229,7 @@ public class LimelightTagLockAutoRpm extends LinearOpMode {
     public void runOpMode() {
         limelight = hardwareMap.get(Limelight3A.class, LIMELIGHT_NAME);
         camServo = hardwareMap.get(Servo.class, CAM_SERVO_NAME);
+        light = new TagLockLight(hardwareMap);   // skipped if "rgbLight" is not configured
         motor = hardwareMap.get(DcMotorEx.class, MOTOR_NAME);
 
         // Motor setup. FLOAT so it coasts to a stop instead of slamming the brakes at high RPM.
@@ -285,6 +289,7 @@ public class LimelightTagLockAutoRpm extends LinearOpMode {
             }
 
             camServo.setPosition(servoPosition);
+            light.show(lightState());
 
             // PART B: Motor speed from tag distance
             updateMotor();
@@ -293,6 +298,7 @@ public class LimelightTagLockAutoRpm extends LinearOpMode {
         }
 
         motor.setPower(0.0);
+        light.off();
         limelight.stop();
     }
 
@@ -535,6 +541,18 @@ public class LimelightTagLockAutoRpm extends LinearOpMode {
         section = Section.SEARCH;
     }
 
+    /**
+     * What the RGB light should show: which section the tag lock is in, or NO_CAMERA if it is
+     * searching without any data from the Limelight.
+     */
+    private TagLockLight.State lightState() {
+        switch (section) {
+            case ALIGN:  return TagLockLight.State.TAG_IN_VIEW;
+            case LOCKED: return TagLockLight.State.LOCKED;
+            default:     return limelightHasData ? TagLockLight.State.SEARCHING : TagLockLight.State.NO_CAMERA;
+        }
+    }
+
     // =====================================================================================
     // Telemetry (both parts)
     // =====================================================================================
@@ -562,6 +580,7 @@ public class LimelightTagLockAutoRpm extends LinearOpMode {
 
         boolean atEndOfTravel = servoPosition <= SERVO_MIN_POS || servoPosition >= SERVO_MAX_POS;
         telemetry.addData("Servo position", atEndOfTravel ? "%.3f (end of travel)" : "%.3f", servoPosition);
+        telemetry.addData("Light", light.describe());
 
         // PART B: Motor
         double actualRpm = ticksPerSecToRpm(motor.getVelocity());

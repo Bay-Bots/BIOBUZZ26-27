@@ -33,6 +33,8 @@ import java.util.List;
  *   - Limelight 3A (plugged into USB, listed with the webcams)        name: "limelight"
  *   - Standard position servo (not continuous rotation) that turns
  *     the Limelight, on a servo port, type Servo                      name: "camServo"
+ *   - goBILDA RGB Indicator Light (optional) on a servo port,
+ *     type Servo. Shows the tag lock's state, see TagLockLight        name: "rgbLight"
  *
  * Limelight pipeline (set up in the Limelight web interface):
  *   - PIPELINE_INDEX must be an AprilTag pipeline (family 36h11)
@@ -111,6 +113,7 @@ public class LimelightTagLock extends LinearOpMode {
 
     private Limelight3A limelight;
     private Servo camServo;
+    private TagLockLight light;   // goBILDA RGB light showing the tag lock's state
 
     private Section section = Section.SEARCH;
     private double servoPosition = SERVO_START_POS;   // where the servo is being told to go
@@ -130,6 +133,7 @@ public class LimelightTagLock extends LinearOpMode {
     public void runOpMode() {
         limelight = hardwareMap.get(Limelight3A.class, LIMELIGHT_NAME);
         camServo = hardwareMap.get(Servo.class, CAM_SERVO_NAME);
+        light = new TagLockLight(hardwareMap);   // skipped if "rgbLight" is not configured
 
         // A servo cannot report where it is, so send it to a known position to start from
         camServo.setPosition(servoPosition);
@@ -167,9 +171,11 @@ public class LimelightTagLock extends LinearOpMode {
             }
 
             camServo.setPosition(servoPosition);
+            light.show(lightState());
             showTelemetry();
         }
 
+        light.off();
         limelight.stop();
     }
 
@@ -305,6 +311,18 @@ public class LimelightTagLock extends LinearOpMode {
         section = Section.SEARCH;
     }
 
+    /**
+     * What the RGB light should show: which section the tag lock is in, or NO_CAMERA if it is
+     * searching without any data from the Limelight.
+     */
+    private TagLockLight.State lightState() {
+        switch (section) {
+            case ALIGN:  return TagLockLight.State.TAG_IN_VIEW;
+            case LOCKED: return TagLockLight.State.LOCKED;
+            default:     return limelightHasData ? TagLockLight.State.SEARCHING : TagLockLight.State.NO_CAMERA;
+        }
+    }
+
     private void showTelemetry() {
         switch (section) {
             case SEARCH:
@@ -328,6 +346,7 @@ public class LimelightTagLock extends LinearOpMode {
 
         boolean atEndOfTravel = servoPosition <= SERVO_MIN_POS || servoPosition >= SERVO_MAX_POS;
         telemetry.addData("Servo position", atEndOfTravel ? "%.3f (end of travel)" : "%.3f", servoPosition);
+        telemetry.addData("Light", light.describe());
         telemetry.update();
     }
 
