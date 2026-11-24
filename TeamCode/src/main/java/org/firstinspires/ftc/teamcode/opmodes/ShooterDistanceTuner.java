@@ -151,7 +151,7 @@ public class ShooterDistanceTuner extends LinearOpMode {
     // =========================
     // The floor distances (inches) the tuner asks for, in order, closest first.
     // Add, remove or change these to match where you will shoot from.
-    private static final double[] TEST_DISTANCES_IN = { 24, 36, 48, 60, 72, 96, 120 };
+    private static final double[] TEST_DISTANCES_IN = { 24, 36, 48, 60, 72, 96, 120, 144 };
 
     // RPM of the first test shot at the first distance. Later distances start with a guess
     // from the RPMs that worked so far.
@@ -177,7 +177,7 @@ public class ShooterDistanceTuner extends LinearOpMode {
 
     // Readings outside this range are treated as bad data and ignored
     private static final double MIN_VALID_DISTANCE_IN = 2.0;
-    private static final double MAX_VALID_DISTANCE_IN = 240.0;
+    private static final double MAX_VALID_DISTANCE_IN = 400.0;
 
     // A distance reading older than this is too old to save with a point
     private static final double DISTANCE_FRESH_SEC = 1.0;

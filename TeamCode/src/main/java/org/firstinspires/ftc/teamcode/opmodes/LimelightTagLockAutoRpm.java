@@ -164,8 +164,8 @@ public class LimelightTagLockAutoRpm extends LinearOpMode {
     // directly below it. Closer than the first row uses the first RPM; farther than the last
     // row uses the last RPM. You can add or remove rows, as long as both lists stay the same
     // length. (The tuner's finish screen shows its table in this form, if you want to paste it.)
-    private static final double[] TABLE_DISTANCE_IN = {   24,   36,   48,   60,   72,   96,  120 };
-    private static final double[] TABLE_RPM         = { 2500, 2800, 3100, 3400, 3700, 4300, 4900 };
+    private static final double[] TABLE_DISTANCE_IN = {   24,   36,   48,   60,   72,   96,  120,  144,  168 };
+    private static final double[] TABLE_RPM         = { 2500, 2800, 3100, 3400, 3700, 4300, 4900, 5500, 6000 };
 
     // Smooths out jitter in the distance reading so the motor speed does not wobble.
     // 1.0 = no smoothing (follows every reading), smaller = smoother but slower to react.
@@ -173,7 +173,7 @@ public class LimelightTagLockAutoRpm extends LinearOpMode {
 
     // Readings outside this range are treated as bad data and ignored
     private static final double MIN_VALID_DISTANCE_IN = 2.0;     // 0 means the Limelight sent no 3D data
-    private static final double MAX_VALID_DISTANCE_IN = 240.0;
+    private static final double MAX_VALID_DISTANCE_IN = 400.0;
 
     // Flip to REVERSE if the motor spins the wrong way
     private static final DcMotorSimple.Direction MOTOR_DIRECTION = DcMotorSimple.Direction.FORWARD;
@@ -372,9 +372,28 @@ public class LimelightTagLockAutoRpm extends LinearOpMode {
     }
 
     private String tableText() {
+        String range = String.format("%.0f-%.0f in", table.distanceAt(0), table.distanceAt(table.size() - 1));
         return tableFromTuner
-                ? String.format("from Shooter Distance Tuner (%d points)", table.size())
-                : "built-in PLACEHOLDER table (run Shooter Distance Tuner to make a real one)";
+                ? String.format("from Shooter Distance Tuner (%d points, %s)", table.size(), range)
+                : "built-in PLACEHOLDER table, " + range + " (run Shooter Distance Tuner to make a real one)";
+    }
+
+    /**
+     * Why the speed is what it is. Past either end of the table the RPM does not change any
+     * more, so say so: that is what it looks like when the motor seems "stuck".
+     */
+    private String autoText() {
+        double first = table.distanceAt(0);
+        double last = table.distanceAt(table.size() - 1);
+        if (smoothedDistanceIn > last) {
+            return String.format("AUTO - PAST the farthest table point (%.0f in), so it uses that point's %.0f RPM",
+                    last, table.rpmAt(table.size() - 1));
+        }
+        if (smoothedDistanceIn < first) {
+            return String.format("AUTO - CLOSER than the nearest table point (%.0f in), so it uses that point's %.0f RPM",
+                    first, table.rpmAt(0));
+        }
+        return "AUTO from distance";
     }
 
     private static double rpmToTicksPerSec(double rpm) {
@@ -566,7 +585,7 @@ public class LimelightTagLockAutoRpm extends LinearOpMode {
 
         switch (motorMode) {
             case WAITING_FOR_TAG: telemetry.addData("Motor", "DEFAULT %.0f RPM until a tag is seen", DEFAULT_RPM); break;
-            case AUTO:            telemetry.addData("Motor", "AUTO from distance"); break;
+            case AUTO:            telemetry.addData("Motor", autoText()); break;
             case HOLDING:         telemetry.addData("Motor", "HOLDING last speed (no distance right now)"); break;
             case STOPPED:         telemetry.addData("Motor", "STOPPED (press A to restart)"); break;
         }
