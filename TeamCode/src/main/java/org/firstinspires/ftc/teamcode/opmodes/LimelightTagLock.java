@@ -29,10 +29,17 @@ import java.util.List;
  * If the tag stays out of sight for LOST_TIMEOUT_SEC in Section 2 or 3, the program goes back
  * to Section 1 and sweeps toward the side where the tag was last seen.
  *
+ * The goBILDA RGB Indicator Light shows what the camera is doing:
+ *   red = Section 1, searching     yellow = Section 2, aligning     green = Section 3, locked
+ *   off = the Limelight is not sending data
+ * Change the colors with the LIGHT_ settings below. The light is optional: without "rgbLight"
+ * in the Robot Configuration, the program runs the same and the Driver Station says so.
+ *
  * Robot Configuration:
  *   - Limelight 3A (plugged into USB, listed with the webcams)        name: "limelight"
  *   - Standard position servo (not continuous rotation) that turns
  *     the Limelight, on a servo port, type Servo                      name: "camServo"
+ *   - goBILDA RGB Indicator Light, on a servo port, type Servo        name: "rgbLight"
  *
  * Limelight pipeline (set up in the Limelight web interface):
  *   - PIPELINE_INDEX must be an AprilTag pipeline (family 36h11)
@@ -53,6 +60,7 @@ public class LimelightTagLock extends LinearOpMode {
     // =========================
     private static final String LIMELIGHT_NAME = "limelight";
     private static final String CAM_SERVO_NAME = "camServo";
+    private static final String LIGHT_NAME     = "rgbLight";
 
     // =========================
     // AprilTag
@@ -105,12 +113,22 @@ public class LimelightTagLock extends LinearOpMode {
     // Longest time step used for one loop, so one slow loop cannot throw the servo a long way
     private static final double MAX_LOOP_SEC = 0.1;
 
+    // =========================
+    // RGB indicator light: the color for each section (any color from RgbIndicatorLight)
+    // =========================
+    private static final double LIGHT_NO_DATA   = RgbIndicatorLight.OFF;     // Limelight not sending data
+    private static final double LIGHT_SEARCHING = RgbIndicatorLight.RED;     // Section 1: looking for a tag
+    private static final double LIGHT_ALIGNING  = RgbIndicatorLight.YELLOW;  // Section 2: centering on the tag
+    private static final double LIGHT_LOCKED    = RgbIndicatorLight.GREEN;   // Section 3: locked on the tag
+
     private static final int NO_TAG = -1;
 
     private enum Section { SEARCH, ALIGN, LOCKED }
 
     private Limelight3A limelight;
     private Servo camServo;
+    private Servo light;                              // RGB indicator light, or null if not configured
+    private double lightShowing = RgbIndicatorLight.OFF;   // the color last sent to the light
 
     private Section section = Section.SEARCH;
     private double servoPosition = SERVO_START_POS;   // where the servo is being told to go
@@ -134,6 +152,11 @@ public class LimelightTagLock extends LinearOpMode {
         // A servo cannot report where it is, so send it to a known position to start from
         camServo.setPosition(servoPosition);
 
+        // The light is optional: tryGet returns null, instead of stopping with an error, if there
+        // is no "rgbLight" in the Robot Configuration. It stays off until Play.
+        light = hardwareMap.tryGet(Servo.class, LIGHT_NAME);
+        setLight(RgbIndicatorLight.OFF);
+
         // Send telemetry often so the Driver Station keeps up with the camera
         telemetry.setMsTransmissionInterval(11);
 
@@ -148,6 +171,7 @@ public class LimelightTagLock extends LinearOpMode {
         limelight.start();
 
         telemetry.addData("Status", "Ready. Press Play to search for AprilTag %s", targetIdsText());
+        telemetry.addData("Light", lightText());
         telemetry.update();
 
         waitForStart();
@@ -167,9 +191,11 @@ public class LimelightTagLock extends LinearOpMode {
             }
 
             camServo.setPosition(servoPosition);
+            setLight(lightColor());
             showTelemetry();
         }
 
+        setLight(RgbIndicatorLight.OFF);
         limelight.stop();
     }
 
@@ -293,6 +319,28 @@ public class LimelightTagLock extends LinearOpMode {
         servoPosition = Range.clip(servoPosition + positionChange, SERVO_MIN_POS, SERVO_MAX_POS);
     }
 
+    /** The light's color for what the camera is doing right now (see the LIGHT_ settings). */
+    private double lightColor() {
+        if (!limelightHasData) return LIGHT_NO_DATA;
+        switch (section) {
+            case ALIGN:  return LIGHT_ALIGNING;
+            case LOCKED: return LIGHT_LOCKED;
+            default:     return LIGHT_SEARCHING;
+        }
+    }
+
+    /** Sends a color to the RGB indicator light, if there is one. */
+    private void setLight(double color) {
+        lightShowing = color;
+        if (light != null) light.setPosition(color);
+    }
+
+    /** The light's color, or why there is no light, for the Driver Station. */
+    private String lightText() {
+        if (light == null) return "none (no Servo named \"" + LIGHT_NAME + "\" in the Robot Configuration)";
+        return RgbIndicatorLight.name(lightShowing);
+    }
+
     private boolean tagIsLost() {
         return tag == null && sinceTagSeen.seconds() > LOST_TIMEOUT_SEC;
     }
@@ -328,6 +376,7 @@ public class LimelightTagLock extends LinearOpMode {
 
         boolean atEndOfTravel = servoPosition <= SERVO_MIN_POS || servoPosition >= SERVO_MAX_POS;
         telemetry.addData("Servo position", atEndOfTravel ? "%.3f (end of travel)" : "%.3f", servoPosition);
+        telemetry.addData("Light", lightText());
         telemetry.update();
     }
 
