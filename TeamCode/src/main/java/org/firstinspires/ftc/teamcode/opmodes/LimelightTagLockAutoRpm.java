@@ -116,12 +116,14 @@ public class LimelightTagLockAutoRpm extends LinearOpMode {
     private static final double SERVO_START_POS = 0.5;   // where the servo goes when you press Init
 
     // Degrees the camera turns when the servo goes from position 0.0 to 1.0.
-    // 270 fits a goBILDA 300-degree servo on the SDK's default 600-2400 us range.
+    // The servo turns 270 degrees (a goBILDA 300-degree servo on the SDK's default 600-2400 us
+    // range), and its 60-tooth gear drives the 176-tooth turret gear: 270 * 60 / 176 = about 92.
     // It turns the speeds below (in degrees) into servo movement, so close is good enough.
-    private static final double SERVO_RANGE_DEG = 270.0;
+    private static final double SERVO_RANGE_DEG = 270.0 * 60.0 / 176.0;
 
-    // true: a higher servo position turns the camera to the right (seen from behind the camera)
-    private static final boolean HIGHER_POSITION_TURNS_RIGHT = true;
+    // true: a higher servo position turns the camera to the right (seen from behind the camera).
+    // false on the turret, because the servo gear and the turret gear turn opposite ways.
+    private static final boolean HIGHER_POSITION_TURNS_RIGHT = false;
 
     // =========================
     // PART A, Section 1: search
